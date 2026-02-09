@@ -1,0 +1,255 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/**
+ * USER MODEL
+ * Represents a user in our application (Flux - social media platform)
+ * Stores user profile information and authentication details
+ * 
+ * Fields:
+ * - id: Unique identifier for each user (auto-generated)
+ * - email: User's email address (must be unique for login/recovery)
+ * - username: User's display name (must be unique for @mentions and profile URLs)
+ * - clerkId: External authentication ID from Clerk service (third-party auth provider)
+ * - name, bio, image, location, website: Optional profile customization fields
+ * - createdAt, updatedAt: Timestamps for audit trail
+ * 
+ * Relations:
+ * - posts: All posts created by this user
+ * - comments: All comments made by this user
+ * - likes: All posts this user has liked
+ * - followers/following: Bidirectional follow relationships (user can follow others and be followed)
+ * - notifications: Notifications targeted to this user
+ * - notificationsCreated: Notifications this user created (likes, follows, comments on their content)
+ */
+
+/**
+ * POST MODEL
+ * Represents a social media post/tweet
+ * Core content model for the platform
+ * 
+ * Fields:
+ * - id: Unique post identifier
+ * - authorId: Foreign key linking to the User who created this post
+ * - content: The main text/message of the post
+ * - image: Optional image attachment
+ * - createdAt: When the post was published
+ * 
+ * Relations:
+ * - author: References the User who created this post
+ *   (onDelete: Cascade = if user is deleted, all their posts are deleted too)
+ * - comments: All comments on this post
+ * - likes: All users who liked this post
+ * - notifications: Notifications generated from interactions with this post
+ */
+
+/**
+ * COMMENT MODEL
+ * Represents a comment on a post
+ * Allows discussion/replies under posts
+ * 
+ * Fields:
+ * - id: Unique comment identifier
+ * - content: The comment text
+ * - authorId: Foreign key to the user who wrote the comment
+ * - postId: Foreign key to the post being commented on
+ * - createdAt: When comment was posted
+ * - notifications: Notifications from interactions on this comment
+ * 
+ * Relations:
+ * - author: User who wrote this comment (cascade delete)
+ * - post: The post this comment belongs to (cascade delete)
+ * 
+ * Indexes:
+ * - @@index([authorId, postId]): Optimizes queries for "find comments by author on a post"
+ */
+
+/**
+ * LIKE MODEL
+ * Represents a user liking/favoriting a post
+ * Tracks engagement metrics
+ * 
+ * Fields:
+ * - id: Unique like identifier
+ * - postId: Which post is being liked
+ * - userId: Which user is liking the post
+ * - createdAt: When the like was created
+ * 
+ * Relations:
+ * - user: The user who liked (cascade delete)
+ * - post: The post that was liked (cascade delete)
+ * 
+ * Indexes & Constraints:
+ * - @@index([userId, postId]): Speeds up queries like "get all posts liked by user X"
+ * - @@unique([userId, postId]): Prevents duplicate likes (same user can't like same post twice)
+ */
+
+/**
+ * FOLLOWS MODEL
+ * Represents a follow relationship between two users
+ * Enables social graph (followers/following feature)
+ * 
+ * Fields:
+ * - followerId: The user who is following (the one doing the action)
+ * - followingId: The user being followed (the one receiving the follow)
+ * - createdAt: When the follow relationship was created
+ * 
+ * Relations:
+ * - follower: The user initiating the follow (cascade delete)
+ * - following: The user being followed (cascade delete)
+ * 
+ * Indexes & Constraints:
+ * - @@index([followerId, followingId]): Optimizes queries for "get all users X follows"
+ * - @@id([followerId, followingId]): Composite primary key prevents duplicate follows
+ *   (User A can't follow User B twice)
+ * 
+ * Why separate model instead of array field?
+ * Allows many-to-many relationships and tracks the creation date of each follow
+ */
+
+/**
+ * NOTIFICATION MODEL
+ * Represents events that should alert a user
+ * Tracks social interactions (likes, comments, follows) on user's content
+ * 
+ * Fields:
+ * - id: Unique notification identifier
+ * - userId: Who should receive this notification
+ * - creatorId: Who caused this notification (liked/commented/followed)
+ * - type: What happened (LIKE, COMMENT, or FOLLOW)
+ * - read: Whether user has seen this notification
+ * - postId: Relevant post (for LIKE and COMMENT notifications)
+ * - commentId: Relevant comment (if notification is about a comment)
+ * - createdAt: When the interaction happened
+ * 
+ * Relations:
+ * - user: The user receiving the notification (cascade delete)
+ * - creator: The user who triggered the notification (cascade delete)
+ * - post: The post involved (optional, cascade delete)
+ * - comment: The comment involved (optional, cascade delete)
+ * 
+ * Indexes:
+ * - @@index([userId, createdAt]): Optimizes "fetch user's notifications sorted by date"
+ */
+
+/**
+ * NOTIFICATIONTYPE ENUM
+ * Defines what types of notifications can exist
+ * - LIKE: Another user liked a post
+ * - COMMENT: Another user commented on a post
+ * - FOLLOW: Another user followed you
+ */
+model User {
+  id String @id @default(cuid())
+  email String @unique
+  username String @unique
+  clerkId String @unique
+  name String?
+  bio String?
+  image String?
+  location String?
+  website String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations with other models
+  posts Post[]
+  comments Comment[]
+  likes Like[]
+
+  followers Follows[] @relation("following")
+  following Follows[] @relation("follower")
+
+  notifications Notification[] @relation("userNotifications")
+  notificationsCreated Notification[] @relation("notificationCreator")
+}
+
+model Post {
+  id String @id @default(cuid())
+  authorId String
+  content String?
+  image String?
+
+  createdAt DateTime @default(now())
+
+  author User @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  comments Comment[]
+  likes Like[]
+  notifications Notification[]
+}
+
+model Comment {
+  id String @id @default(cuid())
+  content String
+  authorId String
+  postId String
+  notifications Notification[]
+
+  createdAt DateTime @default(now())
+
+  author User @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  post Post @relation(fields: [postId],references: [id],onDelete: Cascade)
+
+  @@index([authorId,postId])
+}
+
+model Like {
+  id String @id @default(cuid())
+  postId String
+  userId String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([userId,postId])
+  @@unique([userId,postId])
+}
+
+model Follows {
+  followerId String
+  followingId String
+  createdAt DateTime @default(now())
+
+  follower User @relation("follower", fields: [followerId], references: [id], onDelete: Cascade)
+  following User @relation("following", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@index([followerId,followingId])
+  @@id([followerId,followingId])
+}
+
+model Notification {
+  id String @id @default(cuid())
+  userId String
+  creatorId String
+  type NotificationType
+  read Boolean @default(false)
+  postId String?
+  commentId String?
+  createdAt DateTime @default(now())
+
+  user User @relation("userNotifications", fields: [userId], references: [id],onDelete: Cascade)
+  creator User @relation("notificationCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  post Post? @relation(fields: [postId], references: [id], onDelete: Cascade)
+  comment Comment? @relation(fields: [commentId],references: [id],onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+enum NotificationType {
+  LIKE
+  COMMENT
+  FOLLOW
+}
